@@ -19,11 +19,18 @@
 #include<stdio.h>
 #include<stdlib.h>
 #include<string.h>
+#include<stdarg.h>
 
 /*	POSIX headers		*/
 #include<unistd.h>
+#include<sys/types.h>
+#include<sys/stat.h>
+#include<fcntl.h>
 #include<sys/socket.h>
 #include<sys/un.h>
+#include<errno.h>
+#include<signal.h>
+#include<sys/wait.h>
 
 #define CONF_BACKLOG		128
 
@@ -35,7 +42,7 @@ static void usage(const char *self)
 {
 	fprintf(stderr,"%s: Usage\n\t%s ",self,self);
 	fputs(
-"<SOCKET_PATH> <Program>",stderr);
+"<SOCKET_PATH> <Program>\n",stderr);
 }
 
 static void log_init(const char *path)
@@ -45,13 +52,14 @@ static void log_init(const char *path)
 		fprintf(stderr,"Cannot open log file %s\n",path);
 		exit(-1);
 	}
-	return 0;
+	return;
 }
 
 #define LOG_ERROR	0
 #define LOG_WARN	1
 #define LOG_INFO	2
-static void log(int level,const char *fmt,...)
+
+static void log_write(int level,const char *fmt,...)
 {
 	if (level > gLogLevel)
 		return;
@@ -68,10 +76,42 @@ static void log(int level,const char *fmt,...)
 	va_end(arg);
 
 	static const char *levelInfo[] ={"[ERROR]: ","[WARN]: ","[INFO]: "};
-	write(logFile,levelInfo[level],strlen(levelInfo[level]));
-	write(logFile,s,length - 1);
+	write(gLogFile,levelInfo[level],strlen(levelInfo[level]));
+	write(gLogFile,s,length - 1);
 
 	free(s);
+	return;
+}
+
+static void sig_child(int sig)
+{
+	(void)sig;
+	pid_t pid = wait(NULL);
+	log_write(LOG_INFO,"Childprocess %d exit\n",pid);
+	return;
+}
+
+static void replace_self(const char *file,int conn)
+{
+	dup2(conn,STDIN_FILENO);
+	dup2(conn,STDOUT_FILENO);
+	dup2(gLogFile,STDERR_FILENO);
+	execlp(file,"tty2socket",NULL);
+	log_write(LOG_ERROR,"execlp()");
+	return;
+}
+
+static void spawn_process(const char *file,int conn)
+{
+	pid_t pid = fork();
+	if (!pid) {
+		return;
+	} else if (pid > 0) {
+		log_write(LOG_INFO,"New child: pid %d,fd %d",pid,conn);
+		replace_self(file,conn);
+	} else if (pid < 0) {
+		log_write(LOG_ERROR,"Error when forking a new process");
+	}
 	return;
 }
 
@@ -80,13 +120,13 @@ int main(int argc,const char *argv[])
 	const char *argPath = NULL,*argProc;
 	int step = 0;
 	for (int i = 1;i < argc;i++) {
-		if (strcmp(argv[i],"-l")) {
+		if (!strcmp(argv[i],"-l")) {
 			log_init(argv[i + 1]);
 			i++;
-		} else if (strcmp(argv[i],"-v")) {
-			logLevel = LOG_WARN;
-		} else if (strcmp(argv[i],"-V")) {
-			logLevel = LOG_INFO;
+		} else if (!strcmp(argv[i],"-v")) {
+			gLogLevel = LOG_WARN;
+		} else if (!strcmp(argv[i],"-V")) {
+			gLogLevel = LOG_INFO;
 		} else {
 			if (step == 0) {
 				argPath = argv[i];
@@ -97,8 +137,13 @@ int main(int argc,const char *argv[])
 			}
 		}
 	}
+	if (!argPath || !argProc) {
+		usage(argv[0]);
+		return -1;
+	}
+
 	if (!gLogFile)
-		log_init("/dev/null");
+		gLogFile = STDOUT_FILENO;
 
 	gSocket = socket(AF_UNIX,SOCK_STREAM,0);
 	if (gSocket < 0) {
@@ -109,7 +154,7 @@ int main(int argc,const char *argv[])
 	struct sockaddr_un addr;
 	strcpy(addr.sun_path,argPath);		// FIXME: Check for its length
 	addr.sun_family = AF_UNIX;
-	if (bind(gSocket,&addr,sizeof(addr)) < 0) {
+	if (bind(gSocket,(struct sockaddr*)&addr,sizeof(addr)) < 0) {
 		fprintf(stderr,"Cannot bind the socket on %s",argPath);
 		return -1;
 	}
@@ -118,15 +163,22 @@ int main(int argc,const char *argv[])
 		return -1;
 	}
 
+	struct sigaction tmpAction = { .sa_handler = sig_child };
+	sigaction(SIGCHLD,&tmpAction,NULL);
+
 	while (!gStop) {
 		int conn = accept(gSocket,NULL,NULL);
 		if (conn < 0) {
 			if (errno == EINTR)
 				continue;
-			log(LOG_ERROR,"Accept on the socket");
-			abort();
+			log_write(LOG_ERROR,"Accept on the socket");
 		}
+
+		spawn_process(argProc,conn);
+		close(conn);
 	}
+
+	unlink(argPath);
 
 	return 0;
 }
