@@ -1,7 +1,7 @@
 /*
  *	tty2socket
  *	File: tty2socket.c
- *	Date: 2022.09.20
+ *	Date: 2022.09.23
  *	By MIT License.
  *	Copyright (C) 2022 Ziyao.
  */
@@ -42,12 +42,19 @@ static void usage(const char *self)
 {
 	fprintf(stderr,"%s: Usage\n\t%s ",self,self);
 	fputs(
-"<SOCKET_PATH> <Program>\n",stderr);
+"[options] <SOCKET_PATH> <Program>\n"
+"Forward Program's stdin and stdout to a UNIX socket\n"
+"Options:\n"
+"\t-l filename\tspecify the log file\n"
+"\t-v,-V\t\tenable verbose log\n"
+"\t-d\t\tdaemonise and change working directory to /\n"
+"\t-h\t\tprint this help\n",stderr);
 }
 
 static void log_init(const char *path)
 {
-	gLogFile = open(path,O_WRONLY);
+	gLogFile = open(path,O_WRONLY | O_CREAT,
+			     S_IRUSR | S_IWUSR | S_IRGRP | S_IWGRP);
 	if (gLogFile < 0) {
 		fprintf(stderr,"Cannot open log file %s\n",path);
 		exit(-1);
@@ -69,15 +76,18 @@ static void log_write(int level,const char *fmt,...)
 	char tmp[1];
 	size_t length = vsnprintf(tmp,1,fmt,arg) + 1;
 
+	va_end(arg);
+	va_start(arg,fmt);
 	char *s = malloc(sizeof(char) * length);
 	if (!s)
 		return;
 	vsprintf(s,fmt,arg);
 	va_end(arg);
+	s[length - 1]	= '\n';
 
 	static const char *levelInfo[] ={"[ERROR]: ","[WARN]: ","[INFO]: "};
 	write(gLogFile,levelInfo[level],strlen(levelInfo[level]));
-	write(gLogFile,s,length - 1);
+	write(gLogFile,s,length);
 
 	free(s);
 	return;
@@ -87,7 +97,15 @@ static void sig_child(int sig)
 {
 	(void)sig;
 	pid_t pid = wait(NULL);
-	log_write(LOG_INFO,"Childprocess %d exit\n",pid);
+	log_write(LOG_INFO,"Childprocess %d exit",pid);
+	return;
+}
+
+static void sig_exit(int sig)
+{
+	(void)sig;
+	gStop = 1;
+	log_write(LOG_INFO,"Receive signal,exiting");
 	return;
 }
 
@@ -105,20 +123,49 @@ static void spawn_process(const char *file,int conn)
 {
 	pid_t pid = fork();
 	if (!pid) {
-		return;
+		replace_self(file,conn);
 	} else if (pid > 0) {
 		log_write(LOG_INFO,"New child: pid %d,fd %d",pid,conn);
-		replace_self(file,conn);
 	} else if (pid < 0) {
 		log_write(LOG_ERROR,"Error when forking a new process");
 	}
 	return;
 }
 
+static int daemonise()
+{
+	pid_t pid = fork();
+	if (pid < 0)
+		return -1;
+	if (pid)
+		exit(0);
+
+	if (setsid() < 0)
+		return -1;
+
+	pid = fork();
+	if (pid < 0)
+		return -1;
+
+	if (pid)
+		exit(0);
+
+	chdir("/");
+	umask(0);
+
+	close(STDIN_FILENO);
+	close(STDOUT_FILENO);
+	close(STDERR_FILENO);
+
+	return 0;
+}
+
+
+
 int main(int argc,const char *argv[])
 {
 	const char *argPath = NULL,*argProc;
-	int step = 0;
+	int step = 0,argDaemon = 0;
 	for (int i = 1;i < argc;i++) {
 		if (!strcmp(argv[i],"-l")) {
 			log_init(argv[i + 1]);
@@ -127,6 +174,11 @@ int main(int argc,const char *argv[])
 			gLogLevel = LOG_WARN;
 		} else if (!strcmp(argv[i],"-V")) {
 			gLogLevel = LOG_INFO;
+		} else if (!strcmp(argv[i],"-d")) {
+			argDaemon = 1;
+		} else if (!strcmp(argv[i],"-h")) {
+			usage(argv[0]);
+			return -1;
 		} else {
 			if (step == 0) {
 				argPath = argv[i];
@@ -142,8 +194,16 @@ int main(int argc,const char *argv[])
 		return -1;
 	}
 
+	if (argDaemon) {
+		if (daemonise()) {
+			log_write(LOG_ERROR,"Cannot daemonise");
+			return -1;
+		}
+	}
+
 	if (!gLogFile)
-		gLogFile = STDOUT_FILENO;
+		gLogFile = argDaemon ? open("/dev/null",O_WRONLY) :
+				       STDIN_FILENO;
 
 	gSocket = socket(AF_UNIX,SOCK_STREAM,0);
 	if (gSocket < 0) {
@@ -165,6 +225,9 @@ int main(int argc,const char *argv[])
 
 	struct sigaction tmpAction = { .sa_handler = sig_child };
 	sigaction(SIGCHLD,&tmpAction,NULL);
+	tmpAction.sa_handler = sig_exit;
+	sigaction(SIGINT,&tmpAction,NULL);
+	sigaction(SIGTERM,&tmpAction,NULL);
 
 	while (!gStop) {
 		int conn = accept(gSocket,NULL,NULL);
@@ -177,8 +240,8 @@ int main(int argc,const char *argv[])
 		spawn_process(argProc,conn);
 		close(conn);
 	}
-
 	unlink(argPath);
+	close(gLogFile);
 
 	return 0;
 }
