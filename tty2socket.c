@@ -1,7 +1,7 @@
 /*
  *	tty2socket
  *	File: tty2socket.c
- *	Date: 2022.09.23
+ *	Date: 2022.11.22
  *	By MIT License.
  *	Copyright (C) 2022 Ziyao.
  */
@@ -15,6 +15,7 @@
  *	Try to be compatible with s6-ipcserverd
  */
 
+#define _GNU_SOURCE
 /*	Standard C99 headers	*/
 #include<stdio.h>
 #include<stdlib.h>
@@ -35,6 +36,7 @@
 #define CONF_BACKLOG		128
 
 static int gSocket,gStop,gLogFile,gLogLevel;
+static int gCompatS6;
 
 #define perr(s) fputs(s,stderr)
 
@@ -48,6 +50,7 @@ static void usage(const char *self)
 "\t-l filename\tspecify the log file\n"
 "\t-v,-V\t\tenable verbose log\n"
 "\t-d\t\tdaemonise and change working directory to /\n"
+"\t--s6\t\tenable compatible features with s6-ipcserver\n"
 "\t-h\t\tprint this help\n",stderr);
 }
 
@@ -119,10 +122,34 @@ static void replace_self(const char *file,int conn)
 	return;
 }
 
+/*
+ *	Environment Varibles:
+ *		IPCREMOTEGID, IPCREMOTEUID, IPCCONNNUM, IPCREMOTEPATH
+ */
+static void prepare_env(int conn)
+{
+	char tmp[64];
+	struct ucred cred;
+	socklen_t size = sizeof(cred);
+	if (getsockopt(conn,SOL_SOCKET,SO_PEERCRED,&cred,&size)) {
+		log_write(LOG_ERROR,"get remote peer credentials");
+		exit(-1);
+	}
+
+	sprintf(tmp,"%d",cred.uid);
+	setenv("IPCREMOTEUID",tmp,1);
+	sprintf(tmp,"%d",cred.gid);
+	setenv("IPCREMOTEGID",tmp,1);
+	setenv("IPCCONNNUM","1",1);
+	return;
+}
+
 static void spawn_process(const char *file,int conn)
 {
 	pid_t pid = fork();
 	if (!pid) {
+		if (gCompatS6)
+			prepare_env(conn);
 		replace_self(file,conn);
 	} else if (pid > 0) {
 		log_write(LOG_INFO,"New child: pid %d,fd %d",pid,conn);
@@ -178,7 +205,9 @@ int main(int argc,const char *argv[])
 			argDaemon = 1;
 		} else if (!strcmp(argv[i],"-h")) {
 			usage(argv[0]);
-			return -1;
+			return 0;
+		} else if (!strcmp(argv[i],"--s6")) {
+			gCompatS6 = 1;
 		} else {
 			if (step == 0) {
 				argPath = argv[i];
