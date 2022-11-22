@@ -1,0 +1,50 @@
+.TH tty2socket "1" "eweOS Project" "tty2socket"
+
+.SH NAME
+.TP
+tty2socket \- An adaptor from stdin & stdout to (UNIX) socket
+
+.SH SYNOPSIS
+	tty2socket [options] <\fIPATH_TO_UNIX_SOCKET\fR> <\fIProgram\fR>
+
+.SH OPTIONS
+.TP
+.B
+-l filename
+.RS
+specify the log file
+.RE
+
+.TP
+.B
+-v,-V
+.RS
+enable verbose log
+.RE
+
+.TP
+.B
+-d
+.RS
+daemonise and change working directory to /
+.RE
+
+.TP
+.B
+--s6
+.RS
+enable compatible features with s6-ipcserver
+.RE
+
+.TP
+.B
+-h
+.RS
+show help
+.RE
+
+.SH COPYRIGHT
+.TP
+Copyright (c) 2022 Ziyao.
+.TP
+This program is distributed under MIT License and is a part of eweOS Project.
