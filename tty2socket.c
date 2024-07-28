@@ -247,13 +247,23 @@ main(int argc, const char *argv[])
 
 	gSocket = socket(AF_UNIX, SOCK_STREAM, 0);
 	if (gSocket < 0) {
-		perr("Cannot create a UNIX domain socket");
+		perr("Cannot create a UNIX domain socket\n");
 		return -1;
 	}
 
 	struct sockaddr_un addr;
 	strcpy(addr.sun_path, argPath);		// FIXME: Check for its length
 	addr.sun_family = AF_UNIX;
+
+	/*	check whether the socket is in use	*/
+	int ret = connect(gSocket, (struct sockaddr *)&addr, sizeof(addr));
+	if (ret >= 0 || errno == EAGAIN) {
+		perr("Socket is busy, is another daemon already running?\n");
+		return -1;
+	}
+
+	unlink(argPath);	// make sure the path is not busy
+
 	if (bind(gSocket, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
 		fprintf(stderr, "Cannot bind the socket on %s", argPath);
 		return -1;

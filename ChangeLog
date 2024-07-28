@@ -1,0 +1,5 @@
+---
+v0.2.0
+
+- do not refuse to bind on an exist but unused socket
+- print children stderr correctly when no logfile specified
