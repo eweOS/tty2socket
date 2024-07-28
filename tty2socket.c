@@ -232,7 +232,7 @@ int main(int argc,const char *argv[])
 
 	if (!gLogFile)
 		gLogFile = argDaemon ? open("/dev/null",O_WRONLY) :
-				       STDIN_FILENO;
+				       STDERR_FILENO;
 
 	gSocket = socket(AF_UNIX,SOCK_STREAM,0);
 	if (gSocket < 0) {
