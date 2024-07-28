@@ -124,7 +124,7 @@ static void replace_self(const char *file,int conn)
 
 /*
  *	Environment Varibles:
- *		IPCREMOTEGID, IPCREMOTEUID, IPCCONNNUM, IPCREMOTEPATH
+ *		IPCREMOTEEGID, IPCREMOTEEUID, IPCCONNNUM, IPCREMOTEPATH
  */
 static void prepare_env(int conn)
 {
@@ -136,10 +136,11 @@ static void prepare_env(int conn)
 		exit(-1);
 	}
 
+	setenv("PROTO", "IPC", 1);
 	sprintf(tmp,"%d",cred.uid);
-	setenv("IPCREMOTEUID",tmp,1);
+	setenv("IPCREMOTEEUID",tmp,1);
 	sprintf(tmp,"%d",cred.gid);
-	setenv("IPCREMOTEGID",tmp,1);
+	setenv("IPCREMOTEEGID",tmp,1);
 	setenv("IPCCONNNUM","1",1);
 	return;
 }
