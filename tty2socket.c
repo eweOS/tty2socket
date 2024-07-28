@@ -218,6 +218,11 @@ main(int argc, const char *argv[])
 			return 0;
 		} else if (!strcmp(argv[i], "--s6")) {
 			gCompatS6 = 1;
+		} else if (argv[i][0] == '-') {
+			fprintf(stderr, "%s: Unknown option %s\n",
+					argv[0], argv[i]);
+			usage(argv[0]);
+			return -1;
 		} else {
 			if (step == 0) {
 				argPath = argv[i];

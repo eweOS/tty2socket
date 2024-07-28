@@ -1,5 +1,6 @@
 ---
 v0.2.0
 
+- throw an error on unrecognized options
 - do not refuse to bind on an exist but unused socket
 - print children stderr correctly when no logfile specified
