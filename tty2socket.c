@@ -215,6 +215,7 @@ main(int argc, const char *argv[])
 
 	for (int i = 1; i < argc; i++) {
 		if (!strcmp(argv[i], "-l")) {
+			check_param(argv, argc, i);
 			log_init(argv[i + 1]);
 			i++;
 		} else if (!strcmp(argv[i], "-v")) {
