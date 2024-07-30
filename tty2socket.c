@@ -34,7 +34,7 @@
 #define CONF_BACKLOG		128
 
 static int gSocket, gStop, gLogFile, gLogLevel;
-static int gCompatS6;
+static int gCompatS6, gMask = 022;
 
 #define perr(s) fputs(s, stderr)
 
@@ -49,6 +49,7 @@ usage(const char *self)
 "\t-l filename\tspecify the log file\n"
 "\t-v,-V\t\tenable verbose log\n"
 "\t-d\t\tdaemonise and change working directory to /\n"
+"\t-m PERM\t\tspecify socket permissions\n"
 "\t--s6\t\tenable compatible features with s6-ipcserver\n"
 "\t-h\t\tprint this help\n", stderr);
 }
@@ -158,6 +159,7 @@ spawn_process(const char *file, int conn)
 {
 	pid_t pid = fork();
 	if (!pid) {
+		umask(gMask);
 		if (gCompatS6)
 			prepare_env(conn);
 		replace_self(file, conn);
@@ -197,6 +199,14 @@ daemonise(void)
 	return 0;
 }
 
+#define check_param(argv, argc, i) do { \
+	if (i + 1 >= argc) {						\
+		fprintf(stderr, "%s: option %s needs a parameter\n",	\
+			argv[0], argv[i]);				\
+		return -1;						\
+	}								\
+} while (0)
+
 int
 main(int argc, const char *argv[])
 {
@@ -218,6 +228,19 @@ main(int argc, const char *argv[])
 			return 0;
 		} else if (!strcmp(argv[i], "--s6")) {
 			gCompatS6 = 1;
+		} else if (!strcmp(argv[i], "-m")) {
+			check_param(argv, argc, i);
+
+			char *end = NULL;
+			mode_t newMask = strtol(argv[i + 1], &end, 8);
+			if (*end) {
+				fprintf(stderr, "%s: invalid mode %s\n",
+					argv[0], argv[i + 1]);
+				return -1;
+			}
+
+			gMask = umask(~newMask & 0777);
+			i++;
 		} else if (argv[i][0] == '-') {
 			fprintf(stderr, "%s: Unknown option %s\n",
 					argv[0], argv[i]);
